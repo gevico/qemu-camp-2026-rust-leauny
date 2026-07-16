@@ -329,6 +329,7 @@ async fn main() {
             let exercise_check_list_ref = Arc::clone(&exercise_check_list);
             exercise_check_list_ref.lock().unwrap().statistics.total_time = total_time as u32;
             let serialized = serde_json::to_string_pretty(&*exercise_check_list.lock().unwrap()).unwrap();
+            fs::create_dir_all(".github/result").unwrap();
             fs::write(".github/result/check_result.json", serialized).unwrap();
         },
 

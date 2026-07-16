@@ -82,13 +82,14 @@ pub struct ContextLine {
 // The result of compiling an exercise
 pub struct CompiledExercise<'a> {
     exercise: &'a Exercise,
+    temp_path: String,
     _handle: FileHandle,
 }
 
 impl<'a> CompiledExercise<'a> {
     // Run the compiled exercise
     pub fn run(&self) -> Result<ExerciseOutput, ExerciseOutput> {
-        self.exercise.run()
+        self.exercise.run(&self.temp_path)
     }
 }
 
@@ -101,24 +102,27 @@ pub struct ExerciseOutput {
     pub stderr: String,
 }
 
-struct FileHandle;
+struct FileHandle {
+    temp_path: String,
+}
 
 impl Drop for FileHandle {
     fn drop(&mut self) {
-        clean();
+        clean(&self.temp_path);
     }
 }
 
 impl Exercise {
-    pub fn compile(&self) -> Result<CompiledExercise, ExerciseOutput> {
+    pub fn compile(&self) -> Result<CompiledExercise<'_>, ExerciseOutput> {
+        let temp_path = temp_file();
         let cmd = match self.mode {
             Mode::Compile => Command::new("rustc")
-                .args(&[self.path.to_str().unwrap(), "-o", &temp_file()])
+                .args(&[self.path.to_str().unwrap(), "-o", &temp_path])
                 .args(RUSTC_COLOR_ARGS)
                 .args(RUSTC_EDITION_ARGS)
                 .output(),
             Mode::Test => Command::new("rustc")
-                .args(&["--test", self.path.to_str().unwrap(), "-o", &temp_file()])
+                .args(&["--test", self.path.to_str().unwrap(), "-o", &temp_path])
                 .args(RUSTC_COLOR_ARGS)
                 .args(RUSTC_EDITION_ARGS)
                 .output(),
@@ -144,7 +148,7 @@ path = "{}.rs""#,
                 // compilation failure, this would silently fail. But we expect
                 // clippy to reflect the same failure while compiling later.
                 Command::new("rustc")
-                    .args(&[self.path.to_str().unwrap(), "-o", &temp_file()])
+                    .args(&[self.path.to_str().unwrap(), "-o", &temp_path])
                     .args(RUSTC_COLOR_ARGS)
                     .args(RUSTC_EDITION_ARGS)
                     .output()
@@ -163,7 +167,7 @@ path = "{}.rs""#,
                     .args(RUSTC_COLOR_ARGS)
                     .args(&["--", "-D", "warnings", "-D", "clippy::float_cmp"])
                     .output()
-            },
+            }
             Mode::BuildScript => {
                 let cargo_toml = format!(
                     r#"[package]
@@ -192,10 +196,11 @@ path = "{}.rs""#,
         if cmd.status.success() {
             Ok(CompiledExercise {
                 exercise: self,
-                _handle: FileHandle,
+                temp_path: temp_path.clone(),
+                _handle: FileHandle { temp_path },
             })
         } else {
-            clean();
+            clean(&temp_path);
             Err(ExerciseOutput {
                 stdout: String::from_utf8_lossy(&cmd.stdout).to_string(),
                 stderr: String::from_utf8_lossy(&cmd.stderr).to_string(),
@@ -203,17 +208,18 @@ path = "{}.rs""#,
         }
     }
 
-    fn run(&self) -> Result<ExerciseOutput, ExerciseOutput> {
+    fn run(&self, temp_path: &str) -> Result<ExerciseOutput, ExerciseOutput> {
         let arg = match self.mode {
             Mode::Test => "--show-output",
-            Mode::BuildScript => return Ok(ExerciseOutput {
-                stdout: "".to_string(),
-                stderr: "".to_string(),
-            }),
+            Mode::BuildScript => {
+                return Ok(ExerciseOutput {
+                    stdout: "".to_string(),
+                    stderr: "".to_string(),
+                })
+            }
             _ => "",
         };
-        println!("pa={}", temp_file());
-        let cmd = Command::new(&temp_file())
+        let cmd = Command::new(temp_path)
             .arg(arg)
             .output()
             .expect("Failed to run 'run' command");
@@ -289,8 +295,8 @@ impl Display for Exercise {
 }
 
 #[inline]
-fn clean() {
-    let _ignored = remove_file(&temp_file());
+fn clean(temp_path: &str) {
+    let _ignored = remove_file(temp_path);
 }
 
 #[cfg(test)]
